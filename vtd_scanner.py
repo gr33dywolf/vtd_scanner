@@ -66,7 +66,7 @@ async def on_ready():
     scan.start()
 
 
-@tasks.loop(seconds=60)  # Vérifie toutes les 60 secondes
+@tasks.loop(seconds=180)  # Vérifie toutes les 180 secondes
 async def scan():
     channel = client.get_channel(CHANNEL_ID)
     nouvelles = get_new_items()
@@ -85,3 +85,4 @@ async def scan():
 
 
 client.run(TOKEN)
+
