@@ -1,215 +1,218 @@
-# vtd_scanner.py
-"""
-Bot Vinted -> Discord
-- Scan les URLs de recherche Vinted toutes les 360s
-- Gère mieux les 403 en cas de blocage serveur
-- Utilise headers plus “browser-like”
-- Intègre keep_alive Flask + Thread
-- Logs horodatés
-"""
-
 import os
-import asyncio
 import json
+import asyncio
 import logging
-import threading
-import time
 from datetime import datetime
-from typing import List, Dict, Any
+import threading
 
-import aiohttp
-from aiohttp import ClientSession
-from bs4 import BeautifulSoup
 import discord
+from discord import Embed, Intents
 
+from playwright.async_api import async_playwright
 from keep_alive import app as keepalive_app
 
-SEARCH_FILE = 'search.json'
-SEEN_FILE = 'seen.json'
-POLL_INTERVAL = 360  # secondes
 
-DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
-CHANNEL_ID = int(os.environ.get('CHANNEL_ID', '0'))
+# ----------------- CONFIG -----------------
+SEARCH_FILE = "search.json"
+SEEN_FILE = "seen.json"
+POLL_INTERVAL = 360   # secondes
+
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
+CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "0"))
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
 )
-logger = logging.getLogger('vtd_scanner')
 
-intents = discord.Intents.default()
+logger = logging.getLogger("vtd_scanner")
+
+intents = Intents.default()
 client = discord.Client(intents=intents)
+# -----------------------------------------
 
 
-def load_seen() -> Dict[str, Any]:
+# ---------- UTILS -----------
+def load_seen():
     if not os.path.exists(SEEN_FILE):
-        logger.warning("seen.json n’existe pas — création d’un nouvel objet vide.")
         return {}
     try:
-        with open(SEEN_FILE, 'r', encoding='utf-8') as f:
-            content = f.read().strip()
-            if not content:
-                logger.warning("seen.json vide — réinitialisation.")
-                return {}
-            return json.loads(content)
-    except Exception as e:
-        logger.error(f"Erreur lecture seen.json (corrompu?) — réinitialisation. {e}")
+        with open(SEEN_FILE, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except:
         return {}
 
+def save_seen(data):
+    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def save_seen(data: Dict[str, Any]):
-    try:
-        with open(SEEN_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Impossible d’écrire dans seen.json: {e}")
-
-
-def load_searches() -> List[str]:
+def load_searches():
     if not os.path.exists(SEARCH_FILE):
-        logger.warning("search.json introuvable.")
+        logger.error("search.json introuvable !")
         return []
     try:
-        with open(SEARCH_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        with open(SEARCH_FILE, "r", encoding="utf-8") as f:
+            urls = json.load(f)
+            logger.info(f"{len(urls)} URL(s) chargée(s) depuis search.json")
+            return urls
     except Exception as e:
-        logger.error(f"Erreur lecture de search.json: {e}")
+        logger.error(f"Erreur lecture search.json: {e}")
         return []
+# ---------------------------
 
 
-async def fetch(session: ClientSession, url: str) -> str:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.vinted.fr/",
-        "Connection": "keep-alive"
-    }
+async def load_page_html(browser, url):
+    """
+    Ouvre une page par URL pour éviter que Vinted ne détecte un scraping.
+    Cette fonction est appelée en parallèle pour chaque URL.
+    """
     try:
-        async with session.get(url, headers=headers, timeout=30) as resp:
-            if resp.status == 403:
-                logger.error(f"Erreur 403 Forbidden pour {url}")
-                return ""
-            resp.raise_for_status()
-            text = await resp.text()
-            return text
+        page = await browser.new_page()
+        await page.goto(url, timeout=30000)
+        await page.wait_for_timeout(1200)
+        html = await page.content()
+        await page.close()
+        return url, html
     except Exception as e:
-        logger.error(f"Erreur fetch {url}: {e}")
-        return ""
+        logger.error(f"Erreur chargement {url}: {e}")
+        return url, ""
 
 
-def parse_listings_from_search(html: str) -> List[Dict[str, Any]]:
+def parse_listings(html):
+    from bs4 import BeautifulSoup
+    import re
+
     soup = BeautifulSoup(html, "lxml")
-    results: List[Dict[str, Any]] = []
+    items = []
 
     for a in soup.select('a[href*="/item/"]'):
         href = a.get("href")
         if not href:
             continue
-        if href.startswith("/"):
-            url = "https://www.vinted.fr" + href
-        else:
-            url = href
+
+        url = "https://www.vinted.fr" + href if href.startswith("/") else href
         item_id = url.split("/item/")[-1].split("-")[0].split("?")[0]
-        if any(r["id"] == item_id for r in results):
+
+        if any(i["id"] == item_id for i in items):
             continue
+
         title = a.get("title") or a.get("aria-label") or "Annonce Vinted"
+
+        # extraction prix
         price = ""
-        parent = a
-        for _ in range(3):
-            if parent is None:
-                break
-            text = parent.get_text(" ", strip=True)
-            import re
-            m = re.search(r"\d+\s?€", text)
-            if m and not price:
-                price = m.group(0)
-            parent = parent.parent
+        text = a.get_text(" ", strip=True)
+        m = re.search(r"\d+\s?€", text)
+        if m:
+            price = m.group(0)
+
         img_url = ""
         img = a.find("img")
         if img:
             img_url = img.get("src") or img.get("data-src") or ""
-        results.append({
+
+        items.append({
             "id": item_id,
             "title": title,
             "url": url,
             "price": price,
-            "seller": "ND",
-            "condition": "ND",
-            "posted": "ND",
             "images": [img_url] if img_url else []
         })
-    return results
+
+    return items
 
 
-async def scan_and_report(session: ClientSession, channel: discord.TextChannel, searches: List[str], seen: Dict[str, Any]):
-    htmls = await asyncio.gather(*(fetch(session, url) for url in searches))
+async def scan_and_report(browser, channel, searches, seen):
+    logger.info("Chargement des pages en parallèle…")
+
+    # ---- PARALLÈLE ----
+    results = await asyncio.gather(
+        *(load_page_html(browser, url) for url in searches)
+    )
+    # -------------------
 
     new_total = 0
-    for url, html in zip(searches, htmls):
+
+    for url, html in results:
         if not html:
-            logger.info(f"Pas de contenu pour {url} — skipping.")
+            logger.warning(f"Page vide pour {url}")
             continue
-        listings = parse_listings_from_search(html)
-        new_count = 0
+
+        listings = parse_listings(html)
+
         for item in listings:
             if item["id"] in seen:
                 continue
-            embed = discord.Embed(
+
+            embed = Embed(
                 title=item["title"],
                 url=item["url"],
                 timestamp=datetime.utcnow()
             )
             embed.add_field(name="Prix", value=item["price"] or "ND", inline=True)
-            embed.add_field(name="Vendeur", value=item["seller"], inline=True)
-            embed.add_field(name="État", value=item["condition"], inline=True)
-            embed.add_field(name="Publié", value=item["posted"], inline=True)
+
             if item["images"]:
                 embed.set_image(url=item["images"][0])
-            embed.set_footer(text="Vinted • Scanner automatique")
+
+            embed.set_footer(text="Scanner Vinted – Playwright FAST")
+
             try:
                 await channel.send(embed=embed)
-                logger.info(f"Nouvelle annonce envoyée : {item['id']} ({item['url']})")
+                logger.info(f"Nouvelle annonce envoyée : {item['id']}")
             except Exception as e:
-                logger.error(f"Erreur envoi Discord pour {item['id']}: {e}")
-            seen[item["id"]] = {"url": item["url"], "first_seen": datetime.utcnow().isoformat()}
+                logger.error(f"Erreur Discord: {e}")
+
+            seen[item["id"]] = {
+                "url": item["url"],
+                "first_seen": datetime.utcnow().isoformat()
+            }
             new_total += 1
-            new_count += 1
-        if new_count > 0:
-            logger.info(f"{new_count} nouvelles annonces trouvées pour {url}")
+
     if new_total > 0:
         save_seen(seen)
-    logger.info(f"Scan terminé — {new_total} nouvelles annonces.")
+
+    logger.info(f"Scan terminé : {new_total} nouvelles annonces.")
+
 
 @client.event
 async def on_ready():
     logger.info(f"Bot connecté : {client.user}")
+
     channel = client.get_channel(CHANNEL_ID)
     if not channel:
-        logger.error(f"Salon avec ID {CHANNEL_ID} introuvable.")
+        logger.error(f"Salon Discord {CHANNEL_ID} introuvable.")
         return
+
     searches = load_searches()
     if not searches:
-        logger.warning("Aucune URL de recherche chargée.")
+        logger.error("Aucune URL dans search.json !")
         return
+
     seen = load_seen()
-    async with aiohttp.ClientSession() as session:
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+
         while True:
-            logger.info("Début d’un cycle de recherche…")
-            await scan_and_report(session, channel, searches, seen)
-            logger.info(f"Pause {POLL_INTERVAL} secondes avant le prochain cycle.")
+            logger.info("Début d’un cycle de scan…")
+            await scan_and_report(browser, channel, searches, seen)
+            logger.info(f"Pause {POLL_INTERVAL}s…")
             await asyncio.sleep(POLL_INTERVAL)
+
+
 
 def run_keep_alive():
     keepalive_app.run(host="0.0.0.0", port=8080)
+
 
 def main():
     if not DISCORD_TOKEN or CHANNEL_ID == 0:
         logger.error("DISCORD_TOKEN ou CHANNEL_ID manquant.")
         return
+
     threading.Thread(target=run_keep_alive, daemon=True).start()
     client.run(DISCORD_TOKEN)
+
 
 if __name__ == "__main__":
     main()
