@@ -1,10 +1,12 @@
 from flask import Flask
 
-app = Flask('keep_alive')
+app = Flask("keep_alive")
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "OK", 200
+    return "Bot Vinted actif."
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+def keep_alive():
+    from threading import Thread
+    t = Thread(target=lambda: app.run(host="0.0.0.0", port=8080))
+    t.start()
