@@ -52,67 +52,94 @@ class VintedBot:
         return hashlib.md5(hash_input.encode()).hexdigest()
 
     def scrape_vinted(self, search_url):
-        """Scraper les annonces Vinted (structure 2024-2025)"""
+        """Scraper les annonces Vinted en évitant les erreurs 403"""
+
+        # Headers réalistes (Chrome complet)
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
             "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Referer": "https://www.vinted.fr/"
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,*/*;q=0.8"
+            ),
+            "Referer": "https://www.vinted.fr/",
+            "DNT": "1",
         }
 
+        # Session persistante (meilleur camouflage)
+        session = requests.Session()
+
+        # FIRST REQUEST (comme un vrai navigateur qui arrive sur Vinted)
         try:
-            self.logger.info(f"Recherche en cours sur l'URL : {search_url}")
-            
-            response = requests.get(search_url, headers=headers)
+            session.get("https://www.vinted.fr/", headers=headers, timeout=10)
+        except Exception:
+            pass  # Si ça échoue, ce n'est pas grave
+
+        try:
+            self.logger.info(f"📡 Scan de : {search_url}")
+
+            response = session.get(search_url, headers=headers, timeout=10)
+
+            # --- Gestion du blocage 403 ---
+            if response.status_code == 403:
+                self.logger.error("🚫 Vinted a renvoyé un 403 (Forbidden). Tentative de contournement...")
+
+                # Refaire une requête après une pause (mimique humaine)
+                import time
+                time.sleep(2)
+
+                response = session.get(search_url, headers=headers, timeout=10)
+
+                if response.status_code == 403:
+                    self.logger.error("❌ 403 persistant : Vinted bloque l'accès.")
+                    return []
+
+            # Vérification sécurité
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Nouveaux conteneurs Vinted
+            # Sélecteur d'éléments 2025
             items_containers = soup.select('div[class*="feed__item"]')
 
             items = []
 
             for container in items_containers:
                 try:
-                    # Lien de l'annonce
                     link_tag = container.select_one('a[href*="/items/"]')
-                    link = "https://www.vinted.fr" + link_tag['href'] if link_tag else ''
+                    link = "https://www.vinted.fr" + link_tag['href'] if link_tag else ""
 
-                    # Titre
                     title_tag = container.select_one('[data-testid="item-title"]')
                     title = title_tag.text.strip() if title_tag else "Titre non disponible"
 
-                    # Prix
                     price_tag = container.select_one('[data-testid="item-price"]')
                     price = price_tag.text.strip() if price_tag else "Prix non disponible"
 
-                    # Image
                     img_tag = container.find("img")
                     image_url = img_tag["src"] if img_tag else ""
 
-                    item = {
-                        'title': title,
-                        'price': price,
-                        'link': link,
-                        'seller': "Non affiché",
-                        'condition': "Non affiché",
-                        'images': [image_url] if image_url else []
-                    }
-
-                    items.append(item)
+                    items.append({
+                        "title": title,
+                        "price": price,
+                        "link": link,
+                        "seller": "Non affiché",
+                        "condition": "Non affiché",
+                        "images": [image_url] if image_url else []
+                    })
 
                 except Exception as e:
-                    self.logger.warning(f"Erreur lors du traitement d'un article : {e}")
+                    self.logger.warning(f"⚠️ Erreur article : {e}")
 
-            self.logger.info(f"Nombre d'articles trouvés : {len(items)}")
+            self.logger.info(f"✅ Articles trouvés : {len(items)}")
             return items
 
         except Exception as e:
-            self.logger.error(f"Erreur lors de la récupération des données : {e}")
+            self.logger.error(f"❌ Erreur récupération Vinted : {e}")
             return []
+
 
     async def send_discord_message(self, channel, item):
         """Envoyer un message Discord pour un article"""
@@ -243,6 +270,7 @@ def main():
 # Point d'entrée du script
 if __name__ == "__main__":
     main()
+
 
 
 
