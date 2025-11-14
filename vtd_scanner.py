@@ -11,7 +11,7 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-with open("recherches.json", "r", encoding="utf-8") as f:
+with open("search.json", "r", encoding="utf-8") as f:
     RECHERCHES = json.load(f)
 
 derniers_ids = {r['nom']: set() for r in RECHERCHES}
@@ -58,3 +58,4 @@ async def scan():
 
 
 client.run(TOKEN)
+
