@@ -11,25 +11,24 @@ import hashlib
 
 # Configuration du logging
 def setup_logging():
-    # Configuration du logger
     logger = logging.getLogger('VintedBot')
+
+    # Supprimer les gestionnaires existants pour éviter les doublons
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
     logger.setLevel(logging.INFO)
-    
-    # Formatter pour inclure l'horodatage
+
     formatter = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s', 
                                   datefmt='%Y-%m-%d %H:%M:%S')
-    
-    # Handler pour la console
+
+    # Un seul gestionnaire de console
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
-    
-    # Handler pour le fichier de log (optionnel, mais utile)
-    file_handler = RotatingFileHandler('vinted_bot.log', maxBytes=1048576, backupCount=3)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    
+
     return logger
+
 
 class VintedBot:
     def __init__(self, discord_token, channel_id):
@@ -42,7 +41,6 @@ class VintedBot:
         
         # Configuration du client Discord
         intents = discord.Intents.default()
-        intents.message_content = True
         self.client = discord.Client(intents=intents)
         
         # Suivi des articles déjà traités
@@ -77,7 +75,6 @@ class VintedBot:
                         'price': container.find('span', class_='price').text.strip() if container.find('span', class_='price') else 'Prix non disponible',
                         'link': container.find('a', class_='item-link')['href'] if container.find('a', class_='item-link') else '',
                         'seller': container.find('span', class_='username').text.strip() if container.find('span', class_='username') else 'Vendeur inconnu',
-                        'condition': container.find('span', class_='item-condition').text.strip() if container.find('span', class_='item-
                         'condition': container.find('span', class_='item-condition').text.strip() if container.find('span', class_='item-condition') else 'État non spécifié',
                         'images': [img['src'] for img in container.find_all('img', class_='item-image')[:1]] if container.find_all('img', class_='item-image') else []
                     }
