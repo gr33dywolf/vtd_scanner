@@ -1,278 +1,207 @@
+# vtd_scanner.py
+"""
+Bot Vinted -> Discord
+- Scan toutes les URLs depuis search.json toutes les 360s
+- Envoi sur Discord avec embed : titre, prix, vendeur, état, date, image, lien
+- Logs horodatés dans Render
+- Stocke les annonces déjà envoyées dans seen.json
+"""
+
 import os
+import asyncio
 import json
-import requests
+import logging
+from datetime import datetime
+from typing import List, Dict, Any
+
+import aiohttp
+from aiohttp import ClientSession
 from bs4 import BeautifulSoup
 import discord
-import asyncio
-import logging
-from logging.handlers import RotatingFileHandler
-from datetime import datetime
-import hashlib
 
-# Configuration du logging
-def setup_logging():
-    logger = logging.getLogger('VintedBot')
+SEARCH_FILE = 'search.json'
+SEEN_FILE = 'seen.json'
+POLL_INTERVAL = 360  # secondes
 
-    # Supprimer les gestionnaires existants pour éviter les doublons
-    if logger.hasHandlers():
-        logger.handlers.clear()
+DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
+CHANNEL_ID = int(os.environ.get('CHANNEL_ID', '0'))
 
-    logger.setLevel(logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger('vtd_scanner')
 
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s', 
-                                  datefmt='%Y-%m-%d %H:%M:%S')
-
-    # Un seul gestionnaire de console
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-
-    return logger
+intents = discord.Intents.default()
+client = discord.Client(intents=intents)
 
 
-class VintedBot:
-    def __init__(self, discord_token, channel_id):
-        # Configuration du logging
-        self.logger = setup_logging()
-        
-        # Initialisation des paramètres du bot
-        self.discord_token = discord_token
-        self.channel_id = channel_id
-        
-        # Configuration du client Discord
-        intents = discord.Intents.default()
-        self.client = discord.Client(intents=intents)
-        
-        # Suivi des articles déjà traités
-        self.last_checked_items = set()
-
-    def generate_item_hash(self, item):
-        """Générer un hash unique pour chaque article"""
-        hash_input = f"{item.get('link', '')}{item.get('title', '')}{item.get('price', '')}"
-        return hashlib.md5(hash_input.encode()).hexdigest()
-
-    def scrape_vinted(self, search_url):
-        """Scraper les annonces Vinted en évitant les erreurs 403"""
-
-        # Headers réalistes (Chrome complet)
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept": (
-                "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                "image/avif,image/webp,*/*;q=0.8"
-            ),
-            "Referer": "https://www.vinted.fr/",
-            "DNT": "1",
-        }
-
-        # Session persistante (meilleur camouflage)
-        session = requests.Session()
-
-        # FIRST REQUEST (comme un vrai navigateur qui arrive sur Vinted)
-        try:
-            session.get("https://www.vinted.fr/", headers=headers, timeout=10)
-        except Exception:
-            pass  # Si ça échoue, ce n'est pas grave
-
-        try:
-            self.logger.info(f"📡 Scan de : {search_url}")
-
-            response = session.get(search_url, headers=headers, timeout=10)
-
-            # --- Gestion du blocage 403 ---
-            if response.status_code == 403:
-                self.logger.error("🚫 Vinted a renvoyé un 403 (Forbidden). Tentative de contournement...")
-
-                # Refaire une requête après une pause (mimique humaine)
-                import time
-                time.sleep(2)
-
-                response = session.get(search_url, headers=headers, timeout=10)
-
-                if response.status_code == 403:
-                    self.logger.error("❌ 403 persistant : Vinted bloque l'accès.")
-                    return []
-
-            # Vérification sécurité
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Sélecteur d'éléments 2025
-            items_containers = soup.select('div[class*="feed__item"]')
-
-            items = []
-
-            for container in items_containers:
-                try:
-                    link_tag = container.select_one('a[href*="/items/"]')
-                    link = "https://www.vinted.fr" + link_tag['href'] if link_tag else ""
-
-                    title_tag = container.select_one('[data-testid="item-title"]')
-                    title = title_tag.text.strip() if title_tag else "Titre non disponible"
-
-                    price_tag = container.select_one('[data-testid="item-price"]')
-                    price = price_tag.text.strip() if price_tag else "Prix non disponible"
-
-                    img_tag = container.find("img")
-                    image_url = img_tag["src"] if img_tag else ""
-
-                    items.append({
-                        "title": title,
-                        "price": price,
-                        "link": link,
-                        "seller": "Non affiché",
-                        "condition": "Non affiché",
-                        "images": [image_url] if image_url else []
-                    })
-
-                except Exception as e:
-                    self.logger.warning(f"⚠️ Erreur article : {e}")
-
-            self.logger.info(f"✅ Articles trouvés : {len(items)}")
-            return items
-
-        except Exception as e:
-            self.logger.error(f"❌ Erreur récupération Vinted : {e}")
-            return []
+async def fetch(session: ClientSession, url: str) -> str:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        async with session.get(url, headers=headers, timeout=30) as resp:
+            resp.raise_for_status()
+            return await resp.text()
+    except Exception as e:
+        logger.error(f"Erreur fetch {url}: {e}")
+        return ""
 
 
-    async def send_discord_message(self, channel, item):
-        """Envoyer un message Discord pour un article"""
-        try:
+def load_searches() -> List[str]:
+    if not os.path.exists(SEARCH_FILE):
+        logger.warning("search.json introuvable.")
+        return []
+    with open(SEARCH_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_seen() -> Dict[str, Any]:
+    if not os.path.exists(SEEN_FILE):
+        return {}
+    with open(SEEN_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_seen(data: Dict[str, Any]):
+    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def parse_listings_from_search(html: str) -> List[Dict[str, Any]]:
+    soup = BeautifulSoup(html, "lxml")
+    results = []
+
+    for a in soup.select('a[href*="/item/"]'):
+        href = a.get("href")
+        if not href:
+            continue
+
+        if href.startswith("/"):
+            url = "https://www.vinted.fr" + href
+        else:
+            url = href
+
+        item_id = url.split("/item/")[-1].split("-")[0].split("?")[0]
+
+        if any(r["id"] == item_id for r in results):
+            continue
+
+        title = a.get("title") or a.get("aria-label") or "Annonce Vinted"
+        price = ""
+        img_url = ""
+
+        parent = a
+        for _ in range(3):
+            if parent is None:
+                break
+            text = parent.get_text(" ", strip=True)
+
+            import re
+            m = re.search(r"\d+\s?€", text)
+            if m and not price:
+                price = m.group(0)
+
+            parent = parent.parent
+
+        img = a.find("img")
+        if img:
+            img_url = img.get("src") or img.get("data-src") or ""
+
+        results.append({
+            "id": item_id,
+            "title": title,
+            "url": url,
+            "price": price,
+            "seller": "ND",
+            "condition": "ND",
+            "posted": "ND",
+            "images": [img_url] if img_url else []
+        })
+
+    return results
+
+
+async def scan_and_report(session: ClientSession, channel: discord.TextChannel, searches: List[str], seen: Dict[str, Any]):
+    htmls = await asyncio.gather(*(fetch(session, url) for url in searches))
+
+    new_total = 0
+
+    for url, html in zip(searches, htmls):
+        if not html:
+            continue
+
+        listings = parse_listings_from_search(html)
+        new_count = 0
+
+        for item in listings:
+            if item["id"] in seen:
+                continue
+
             embed = discord.Embed(
-                title=item['title'], 
-                description=f"**Vendeur:** {item['seller']}\n**Prix:** {item['price']}\n**État:** {item['condition']}",
-                color=discord.Color.green(),
-                url=item['link']
+                title=item["title"],
+                url=item["url"],
+                timestamp=datetime.utcnow()
             )
-            
-            # Ajouter la première image si disponible
-            if item['images']:
-                embed.set_image(url=item['images'][0])
-            
-            # Bouton "Acheter"
-            embed.add_field(name="Lien de l'annonce", value=f"[Acheter]({item['link']})", inline=False)
-            
-            await channel.send(embed=embed)
-            self.logger.info(f"Message envoyé pour l'article : {item['title']}")
-        
-        except Exception as e:
-            self.logger.error(f"Erreur lors de l'envoi du message Discord : {e}")
+            embed.add_field(name="Prix", value=item["price"] or "ND", inline=True)
+            embed.add_field(name="Vendeur", value=item["seller"], inline=True)
+            embed.add_field(name="État", value=item["condition"], inline=True)
+            embed.add_field(name="Publié", value=item["posted"], inline=True)
 
-    async def monitor_vinted(self):
-        """Surveiller les recherches Vinted"""
-        # Charger les configurations de recherche
-        try:
-            with open('search.json', 'r', encoding='utf-8') as f:
-                searches = json.load(f)
-        except Exception as e:
-            self.logger.error(f"Erreur de lecture du fichier search.json : {e}")
-            return
-        
-        # Récupérer le canal Discord
-        try:
-            channel = self.client.get_channel(int(self.channel_id))
-            if not channel:
-                self.logger.error("Impossible de trouver le canal Discord")
-                return
-        except Exception as e:
-            self.logger.error(f"Erreur lors de la récupération du canal : {e}")
-            return
-        
-        # Boucle principale de monitoring
+            if item["images"]:
+                embed.set_image(url=item["images"][0])
+
+            embed.set_footer(text="Vinted • Recherche")
+
+            try:
+                await channel.send(embed=embed)
+                logger.info(f"Nouvelle annonce envoyée : {item['id']} ({item['url']})")
+            except Exception as e:
+                logger.error(f"Erreur envoi Discord : {e}")
+
+            seen[item["id"]] = {"url": item["url"], "first_seen": datetime.utcnow().isoformat()}
+            new_total += 1
+            new_count += 1
+
+        if new_count > 0:
+            logger.info(f"{new_count} nouvelles annonces trouvées pour {url}")
+
+    if new_total > 0:
+        save_seen(seen)
+
+    logger.info(f"Scan terminé — {new_total} annonces nouvelles au total.")
+
+
+@client.event
+async def on_ready():
+    logger.info(f"Bot connecté : {client.user}")
+
+    channel = client.get_channel(CHANNEL_ID)
+    if not channel:
+        logger.error("CHANNEL_ID introuvable ou bot sans accès.")
+        return
+
+    searches = load_searches()
+    if not searches:
+        logger.warning("Aucune recherche dans search.json")
+        return
+
+    seen = load_seen()
+
+    async with aiohttp.ClientSession() as session:
         while True:
-            for search in searches:
-                try:
-                    # Récupérer les articles
-                    items = self.scrape_vinted(search['search_url'])
-                    
-                    # Traiter chaque article
-                    for item in items:
-                        # Générer un hash unique pour l'article
-                        item_hash = self.generate_item_hash(item)
-                        
-                        # Vérifier si l'article n'a pas déjà été traité
-                        if item_hash not in self.last_checked_items:
-                            await self.send_discord_message(channel, item)
-                            self.last_checked_items.add(item_hash)
-                    
-                    # Limiter la taille de last_checked_items
-                    if len(self.last_checked_items) > 200:
-                        self.last_checked_items = set(list(self.last_checked_items)[-200:])
-                    
-                    # Attendre avant la prochaine vérification
-                    interval = search.get('check_interval', 900)
-                    self.logger.info(f"Attente de {interval} secondes avant la prochaine recherche")
-                    await asyncio.sleep(interval)
-                
-                except Exception as e:
-                    self.logger.error(f"Erreur lors du monitoring pour {search['search_url']} : {e}")
-                    await asyncio.sleep(300)  # Attendre 5 minutes en cas d'erreur
-            
-            # Attente globale entre les cycles de recherche
-            await asyncio.sleep(60)
+            logger.info("Début d’un cycle de recherche…")
+            await scan_and_report(session, channel, searches, seen)
+            logger.info(f"Pause {POLL_INTERVAL}s …")
+            await asyncio.sleep(POLL_INTERVAL)
 
-    async def start(self):
-        """Démarrer le bot Discord"""
-        try:
-            await self.client.login(self.discord_token)
-            self.logger.info("Bot Discord connecté avec succès")
-            
-            # Configurer un événement de prêt
-            @self.client.event
-            async def on_ready():
-                self.logger.info(f"Bot connecté en tant que {self.client.user}")
-                # Lancer le monitoring Vinted en tâche de fond
-                self.client.loop.create_task(self.monitor_vinted())
-            
-            # Démarrer le bot
-            await self.client.start(self.discord_token)
-        
-        except Exception as e:
-            self.logger.error(f"Erreur lors du démarrage du bot : {e}")
 
 def main():
-    """Fonction principale pour initialiser et lancer le bot"""
-    # Récupérer les secrets depuis Replit
-    discord_token = os.environ.get('DISCORD_TOKEN')
-    channel_id = os.environ.get('CHANNEL_ID')
-    
-    # Vérifier la présence des tokens
-    if not discord_token or not channel_id:
-        print("Erreur : Token Discord ou Channel ID manquant")
+    if not DISCORD_TOKEN or CHANNEL_ID == 0:
+        logger.error("Variables d'environnement DISCORD_TOKEN et CHANNEL_ID manquantes.")
         return
-    
-    # Configurer le logger
-    logger = setup_logging()
-    logger.info("Démarrage du bot Vinted")
-    
-    # Créer et démarrer le bot
-    bot = VintedBot(discord_token, channel_id)
-    
-    try:
-        from keep_alive import keep_alive
-        keep_alive()
-        
-        # Utiliser asyncio pour exécuter le bot
-        asyncio.run(bot.start())
-    
-    except KeyboardInterrupt:
-        logger.info("Arrêt du bot")
-    
-    except Exception as e:
-        logger.error(f"Erreur fatale : {e}")
+    client.run(DISCORD_TOKEN)
 
-# Point d'entrée du script
+
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
