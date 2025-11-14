@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import json
 import os
 
-# Récupération des variables d'environnement
+# Variables d'environnement
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
@@ -13,7 +13,7 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-# Chargement des recherches depuis le fichier JSON
+# Chargement des recherches
 with open("recherches.json", "r", encoding="utf-8") as f:
     RECHERCHES = json.load(f)
 
@@ -29,7 +29,7 @@ def scrape_vinted(url):
 
 
 def get_new_items():
-    """Retourne la liste des nouvelles annonces avec lien, prix et image"""
+    """Retourne les nouvelles annonces avec lien, prix et image"""
     nouvelles = []
 
     for recherche in RECHERCHES:
@@ -63,21 +63,25 @@ def get_new_items():
 @client.event
 async def on_ready():
     print(f"{client.user} connecté !")
-    scan.start()  # Démarrage de la tâche en boucle
+    scan.start()
 
 
-@tasks.loop(seconds=180)
+@tasks.loop(seconds=60)  # Vérifie toutes les 60 secondes
 async def scan():
     channel = client.get_channel(CHANNEL_ID)
     nouvelles = get_new_items()
 
     for nom, url, price, img_url in nouvelles:
-        # Message formaté
-        message = f"**{nom}**\nLien : {url}\nPrix : {price}"
+        embed = discord.Embed(
+            title=nom,
+            url=url,
+            description=f"Prix : {price}",
+            color=0x1abc9c
+        )
         if img_url:
-            # Discord affichera automatiquement l'image si URL dans le message
-            message += f"\n{img_url}"
-        await channel.send(message)
+            embed.set_image(url=img_url)
+
+        await channel.send(embed=embed)
 
 
 client.run(TOKEN)
