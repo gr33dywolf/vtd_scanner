@@ -52,10 +52,10 @@ class VintedBot:
         return hashlib.md5(hash_input.encode()).hexdigest()
 
     def scrape_vinted(self, search_url):
-    """Scraper les annonces Vinted (structure 2024-2025)"""
-    headers = {
-        'User-Agent': 'Mozilla/5.0'
-    }
+        """Scraper les annonces Vinted (structure 2024-2025)"""
+        headers = {
+            'User-Agent': 'Mozilla/5.0'
+        }
     
     try:
         self.logger.info(f"Recherche en cours sur l'URL : {search_url}")
@@ -243,5 +243,6 @@ def main():
 # Point d'entrée du script
 if __name__ == "__main__":
     main()
+
 
 
