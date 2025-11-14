@@ -5,6 +5,7 @@ Bot Vinted -> Discord
 - Envoi sur Discord avec embed : titre, prix, vendeur, état, date, image, lien
 - Logs horodatés dans Render
 - Stocke les annonces déjà envoyées dans seen.json
+- Lance keep_alive() pour Render + UptimeRobot
 """
 
 import os
@@ -13,11 +14,16 @@ import json
 import logging
 from datetime import datetime
 from typing import List, Dict, Any
+import threading
 
 import aiohttp
 from aiohttp import ClientSession
 from bs4 import BeautifulSoup
 import discord
+
+# --- Keep alive (Flask) ---
+from keep_alive import app as keepalive_app
+from flask import Flask
 
 SEARCH_FILE = 'search.json'
 SEEN_FILE = 'seen.json'
@@ -37,15 +43,31 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
 
-async def fetch(session: ClientSession, url: str) -> str:
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+# -------------------------------------------------------------
+# Sécurisation totale de load_seen()
+# -------------------------------------------------------------
+def load_seen() -> Dict[str, Any]:
+    if not os.path.exists(SEEN_FILE):
+        logger.warning("seen.json n'existe pas — création d'un fichier vide.")
+        return {}
+
     try:
-        async with session.get(url, headers=headers, timeout=30) as resp:
-            resp.raise_for_status()
-            return await resp.text()
+        with open(SEEN_FILE, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if not content:
+                logger.warning("seen.json était vide — réinitialisation.")
+                return {}
+
+            return json.loads(content)
+
     except Exception as e:
-        logger.error(f"Erreur fetch {url}: {e}")
-        return ""
+        logger.error(f"seen.json corrompu — réinitialisation. Erreur : {e}")
+        return {}
+
+
+def save_seen(data: Dict[str, Any]):
+    with open(SEEN_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def load_searches() -> List[str]:
@@ -56,16 +78,15 @@ def load_searches() -> List[str]:
         return json.load(f)
 
 
-def load_seen() -> Dict[str, Any]:
-    if not os.path.exists(SEEN_FILE):
-        return {}
-    with open(SEEN_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_seen(data: Dict[str, Any]):
-    with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+async def fetch(session: ClientSession, url: str) -> str:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        async with session.get(url, headers=headers, timeout=30) as resp:
+            resp.raise_for_status()
+            return await resp.text()
+    except Exception as e:
+        logger.error(f"Erreur fetch {url}: {e}")
+        return ""
 
 
 def parse_listings_from_search(html: str) -> List[Dict[str, Any]]:
@@ -151,11 +172,11 @@ async def scan_and_report(session: ClientSession, channel: discord.TextChannel, 
             if item["images"]:
                 embed.set_image(url=item["images"][0])
 
-            embed.set_footer(text="Vinted • Recherche")
+            embed.set_footer(text="Vinted • Recherche automatique")
 
             try:
                 await channel.send(embed=embed)
-                logger.info(f"Nouvelle annonce envoyée : {item['id']} ({item['url']})")
+                logger.info(f"Nouvelle annonce envoyée : {item['id']}")
             except Exception as e:
                 logger.error(f"Erreur envoi Discord : {e}")
 
@@ -169,7 +190,7 @@ async def scan_and_report(session: ClientSession, channel: discord.TextChannel, 
     if new_total > 0:
         save_seen(seen)
 
-    logger.info(f"Scan terminé — {new_total} annonces nouvelles au total.")
+    logger.info(f"Scan terminé — {new_total} nouvelles annonces.")
 
 
 @client.event
@@ -190,16 +211,26 @@ async def on_ready():
 
     async with aiohttp.ClientSession() as session:
         while True:
-            logger.info("Début d’un cycle de recherche…")
+            logger.info("Début du cycle de recherche…")
             await scan_and_report(session, channel, searches, seen)
             logger.info(f"Pause {POLL_INTERVAL}s …")
             await asyncio.sleep(POLL_INTERVAL)
 
 
+# -------------------------------------------------------------
+# Lancement du Flask keep_alive() dans un thread
+# -------------------------------------------------------------
+def run_keep_alive():
+    keepalive_app.run(host="0.0.0.0", port=8080)
+
+
 def main():
     if not DISCORD_TOKEN or CHANNEL_ID == 0:
-        logger.error("Variables d'environnement DISCORD_TOKEN et CHANNEL_ID manquantes.")
+        logger.error("DISCORD_TOKEN ou CHANNEL_ID manquant.")
         return
+
+    threading.Thread(target=run_keep_alive).start()
+
     client.run(DISCORD_TOKEN)
 
 
