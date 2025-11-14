@@ -56,63 +56,58 @@ class VintedBot:
         headers = {
             'User-Agent': 'Mozilla/5.0'
         }
-    
-    try:
-        self.logger.info(f"Recherche en cours sur l'URL : {search_url}")
-        
-        response = requests.get(search_url, headers=headers)
-        response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        try:
+            self.logger.info(f"Recherche en cours sur l'URL : {search_url}")
+            
+            response = requests.get(search_url, headers=headers)
+            response.raise_for_status()
 
-        # Nouveaux conteneurs d'articles Vinted
-        items_containers = soup.select('div[class*="feed__item"]')
+            soup = BeautifulSoup(response.text, 'html.parser')
 
-        items = []
+            # Nouveaux conteneurs Vinted
+            items_containers = soup.select('div[class*="feed__item"]')
 
-        for container in items_containers:
-            try:
-                # Lien de l'annonce
-                link_tag = container.select_one('a[href*="/items/"]')
-                link = "https://www.vinted.fr" + link_tag['href'] if link_tag else ''
+            items = []
 
-                # Titre
-                title_tag = container.select_one('[data-testid="item-title"]')
-                title = title_tag.text.strip() if title_tag else "Titre non disponible"
+            for container in items_containers:
+                try:
+                    # Lien de l'annonce
+                    link_tag = container.select_one('a[href*="/items/"]')
+                    link = "https://www.vinted.fr" + link_tag['href'] if link_tag else ''
 
-                # Prix
-                price_tag = container.select_one('[data-testid="item-price"]')
-                price = price_tag.text.strip() if price_tag else "Prix non disponible"
+                    # Titre
+                    title_tag = container.select_one('[data-testid="item-title"]')
+                    title = title_tag.text.strip() if title_tag else "Titre non disponible"
 
-                # Image (première)
-                img_tag = container.find("img")
-                image_url = img_tag["src"] if img_tag else ""
+                    # Prix
+                    price_tag = container.select_one('[data-testid="item-price"]')
+                    price = price_tag.text.strip() if price_tag else "Prix non disponible"
 
-                # Le vendeur n'est plus disponible dans les résultats
-                seller = "Non affiché"
-                condition = "Non affiché"
+                    # Image
+                    img_tag = container.find("img")
+                    image_url = img_tag["src"] if img_tag else ""
 
-                item = {
-                    'title': title,
-                    'price': price,
-                    'link': link,
-                    'seller': seller,
-                    'condition': condition,
-                    'images': [image_url] if image_url else []
-                }
+                    item = {
+                        'title': title,
+                        'price': price,
+                        'link': link,
+                        'seller': "Non affiché",
+                        'condition': "Non affiché",
+                        'images': [image_url] if image_url else []
+                    }
 
-                items.append(item)
+                    items.append(item)
 
-            except Exception as e:
-                self.logger.warning(f"Erreur lors du traitement d'un article : {e}")
+                except Exception as e:
+                    self.logger.warning(f"Erreur lors du traitement d'un article : {e}")
 
-        self.logger.info(f"Nombre d'articles trouvés : {len(items)}")
-        return items
+            self.logger.info(f"Nombre d'articles trouvés : {len(items)}")
+            return items
 
-    except Exception as e:
-        self.logger.error(f"Erreur lors de la récupération des données : {e}")
-        return []
-
+        except Exception as e:
+            self.logger.error(f"Erreur lors de la récupération des données : {e}")
+            return []
 
     async def send_discord_message(self, channel, item):
         """Envoyer un message Discord pour un article"""
@@ -243,6 +238,7 @@ def main():
 # Point d'entrée du script
 if __name__ == "__main__":
     main()
+
 
 
 
