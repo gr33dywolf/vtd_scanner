@@ -1,11 +1,4 @@
 [
-  {
-    "search_url": "https://www.vinted.fr/catalog?search_text=lot%20cartes%20digimon&search_id=28146844880&order=newest_first",
-    "check_interval": 360
-  },
-  {
-    "search_url": "https://www.vinted.fr/catalog?search_text=carte%20digimon&search_id=27729230664&order=newest_first",
-    "check_interval": 360
-  }
+  "https://www.vinted.fr/catalog?search_text=lot%20cartes%20digimon&search_id=28146844880&order=newest_first",
+"https://www.vinted.fr/catalog?search_text=carte%20digimon&search_id=27729230664&order=newest_first"
 ]
-
