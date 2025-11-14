@@ -1,14 +1,18 @@
 [
   {
-    "nom": "Lot cartes digimon",
-    "url": "https://www.vinted.fr/catalog?search_text=lot%20cartes%20digimon&search_id=28146844880&order=newest_first"
+    "search_url": "https://www.vinted.fr/catalog?search_text=lot%20cartes%20digimon&search_id=28146844880&order=newest_first",
+    "check_interval": 360
   },
   {
-    "nom": "Typology calendrier",
-    "url": "https://www.vinted.fr/catalog?search_text=calendrier%20&status_ids[]=1&status_ids[]=6&status_ids[]=2&brand_ids[]=1058943&search_id=28489959890&order=newest_first"
+    "search_url": "https://www.vinted.fr/catalog?search_text=calendrier%20&status_ids[]=1&status_ids[]=6&status_ids[]=2&brand_ids[]=1058943&search_id=28489959890&order=newest_first",
+    "check_interval": 360
   },
   {
-    "nom": "Dune Card",
-    "url": "https://www.vinted.fr/catalog?search_text=dune%20card&search_id=27729242930&order=newest_first"
+    "search_url": "https://www.vinted.fr/catalog?search_text=dune%20card&search_id=27729242930&order=newest_first",
+    "check_interval": 360
+  },
+  {
+    "search_url": "https://www.vinted.fr/catalog?search_text=carte%20digimon&search_id=27729230664&order=newest_first",
+    "check_interval": 360
   }
 ]
