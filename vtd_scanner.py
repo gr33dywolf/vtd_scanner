@@ -54,7 +54,12 @@ class VintedBot:
     def scrape_vinted(self, search_url):
         """Scraper les annonces Vinted (structure 2024-2025)"""
         headers = {
-            'User-Agent': 'Mozilla/5.0'
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Referer": "https://www.vinted.fr/"
         }
 
         try:
@@ -238,6 +243,7 @@ def main():
 # Point d'entrée du script
 if __name__ == "__main__":
     main()
+
 
 
 
