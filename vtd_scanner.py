@@ -203,6 +203,9 @@ def main():
     bot = VintedBot(discord_token, channel_id)
     
     try:
+        from keep_alive import keep_alive
+        keep_alive()
+        
         # Utiliser asyncio pour exécuter le bot
         asyncio.run(bot.start())
     
@@ -215,3 +218,4 @@ def main():
 # Point d'entrée du script
 if __name__ == "__main__":
     main()
+
