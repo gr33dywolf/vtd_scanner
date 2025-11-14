@@ -1,4 +1,7 @@
-discord.py
-requests
+aiohttp
 beautifulsoup4
-flask
+lxml
+discord.py
+Flask
+requests
+python-dotenv
