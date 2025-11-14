@@ -52,42 +52,67 @@ class VintedBot:
         return hashlib.md5(hash_input.encode()).hexdigest()
 
     def scrape_vinted(self, search_url):
-        """Scraper les annonces Vinted"""
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+    """Scraper les annonces Vinted (structure 2024-2025)"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0'
+    }
+    
+    try:
+        self.logger.info(f"Recherche en cours sur l'URL : {search_url}")
         
-        try:
-            self.logger.info(f"Recherche en cours sur l'URL : {search_url}")
-            
-            response = requests.get(search_url, headers=headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Sélecteurs CSS à ajuster selon la structure actuelle de Vinted
-            items_containers = soup.find_all('div', class_='item-container')
-            
-            items = []
-            for container in items_containers:
-                try:
-                    # Extraction des détails (à ajuster selon la structure HTML réelle)
-                    item = {
-                        'title': container.find('h3', class_='item-title').text.strip() if container.find('h3', class_='item-title') else 'Titre non disponible',
-                        'price': container.find('span', class_='price').text.strip() if container.find('span', class_='price') else 'Prix non disponible',
-                        'link': container.find('a', class_='item-link')['href'] if container.find('a', class_='item-link') else '',
-                        'seller': container.find('span', class_='username').text.strip() if container.find('span', class_='username') else 'Vendeur inconnu',
-                        'condition': container.find('span', class_='item-condition').text.strip() if container.find('span', class_='item-condition') else 'État non spécifié',
-                        'images': [img['src'] for img in container.find_all('img', class_='item-image')[:1]] if container.find_all('img', class_='item-image') else []
-                    }
-                    items.append(item)
-                except Exception as e:
-                    self.logger.warning(f"Erreur lors du traitement d'un article : {e}")
-            
-            self.logger.info(f"Nombre d'articles trouvés : {len(items)}")
-            return items
-        
-        except Exception as e:
-            self.logger.error(f"Erreur lors de la récupération des données : {e}")
-            return []
+        response = requests.get(search_url, headers=headers)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Nouveaux conteneurs d'articles Vinted
+        items_containers = soup.select('div[class*="feed__item"]')
+
+        items = []
+
+        for container in items_containers:
+            try:
+                # Lien de l'annonce
+                link_tag = container.select_one('a[href*="/items/"]')
+                link = "https://www.vinted.fr" + link_tag['href'] if link_tag else ''
+
+                # Titre
+                title_tag = container.select_one('[data-testid="item-title"]')
+                title = title_tag.text.strip() if title_tag else "Titre non disponible"
+
+                # Prix
+                price_tag = container.select_one('[data-testid="item-price"]')
+                price = price_tag.text.strip() if price_tag else "Prix non disponible"
+
+                # Image (première)
+                img_tag = container.find("img")
+                image_url = img_tag["src"] if img_tag else ""
+
+                # Le vendeur n'est plus disponible dans les résultats
+                seller = "Non affiché"
+                condition = "Non affiché"
+
+                item = {
+                    'title': title,
+                    'price': price,
+                    'link': link,
+                    'seller': seller,
+                    'condition': condition,
+                    'images': [image_url] if image_url else []
+                }
+
+                items.append(item)
+
+            except Exception as e:
+                self.logger.warning(f"Erreur lors du traitement d'un article : {e}")
+
+        self.logger.info(f"Nombre d'articles trouvés : {len(items)}")
+        return items
+
+    except Exception as e:
+        self.logger.error(f"Erreur lors de la récupération des données : {e}")
+        return []
+
 
     async def send_discord_message(self, channel, item):
         """Envoyer un message Discord pour un article"""
@@ -218,4 +243,5 @@ def main():
 # Point d'entrée du script
 if __name__ == "__main__":
     main()
+
 
