@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import os
+from datetime import datetime
 
 # Variables d'environnement
 TOKEN = os.getenv("TOKEN")
@@ -14,7 +15,7 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
 # Chargement des recherches
-with open("recherches.json", "r", encoding="utf-8") as f:
+with open("search.json", "r", encoding="utf-8") as f:
     RECHERCHES = json.load(f)
 
 # Suivi des annonces déjà envoyées
@@ -62,14 +63,20 @@ def get_new_items():
 
 @client.event
 async def on_ready():
-    print(f"{client.user} connecté !")
+    print(f"{datetime.now()} - {client.user} connecté !")
     scan.start()
 
 
 @tasks.loop(seconds=180)  # Vérifie toutes les 180 secondes
 async def scan():
+    print(f"{datetime.now()} - Nouveau cycle de vérification...")
     channel = client.get_channel(CHANNEL_ID)
     nouvelles = get_new_items()
+
+    if nouvelles:
+        print(f"{datetime.now()} - {len(nouvelles)} nouvelle(s) annonce(s) trouvée(s).")
+    else:
+        print(f"{datetime.now()} - Aucune nouvelle annonce trouvée.")
 
     for nom, url, price, img_url in nouvelles:
         embed = discord.Embed(
@@ -85,4 +92,3 @@ async def scan():
 
 
 client.run(TOKEN)
-
