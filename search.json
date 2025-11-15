@@ -1,14 +1,6 @@
 [
     {
         "name": "digimon_cards",
-        "search_text": "carte digimon",
-        "brand_ids": ["284189", "287297"],
-        "order": "newest_first"
-    },
-    {
-        "name": "pokemon_cards",
-        "search_text": "carte pokemon",
-        "brand_ids": ["1"],
-        "order": "newest_first"
+        "url": "https://www.vinted.fr/catalog?search_text=carte+digimon&order=newest_first&brand_ids[]=284189&brand_ids[]=287297"
     }
 ]
