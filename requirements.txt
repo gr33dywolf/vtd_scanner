@@ -1,8 +1,2 @@
-discord.py==2.3.2
-aiohttp==3.9.5
-beautifulsoup4==4.12.2
-lxml==4.9.2
-playwright==1.44.0
-Flask==2.3.3
-gunicorn==21.2.0
-requests==2.31.0
+aiohttp==3.8.4
+Flask==2.3.2
