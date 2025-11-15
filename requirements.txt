@@ -6,4 +6,3 @@ playwright==1.44.0
 Flask==2.3.3
 gunicorn==21.2.0
 requests==2.31.0
-greenlet==2.0.2
