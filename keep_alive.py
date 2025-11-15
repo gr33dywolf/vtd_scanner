@@ -17,5 +17,4 @@ def start():
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
-# start on import
 start()
