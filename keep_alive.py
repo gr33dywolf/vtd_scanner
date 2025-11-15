@@ -1,12 +1,15 @@
 from flask import Flask
-import os
+from threading import Thread
 
 app = Flask(__name__)
 
-@app.route("/")
+@app.route('/')
 def home():
-    return "OK - vtd_scanner is alive\n", 200
+    return "Bot Vinted Scanner is running!"
 
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    server = Thread(target=run)
+    server.start()
