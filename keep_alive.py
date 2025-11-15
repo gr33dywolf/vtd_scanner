@@ -1,15 +1,23 @@
+# keep_alive.py
 from flask import Flask
-from threading import Thread
+import threading
+import logging
 
-app = Flask(__name__)
+app = Flask("keep_alive")
 
-@app.route('/')
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+@app.route("/")
 def home():
-    return "Bot Vinted Scanner is running!"
+    return "vtd_scanner alive", 200
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    # Run Flask in a thread so main script can continue
+    app.run(host="0.0.0.0", port=8000)
 
-def keep_alive():
-    server = Thread(target=run)
-    server.start()
+def start():
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+
+# Start automatically when imported
+start()
