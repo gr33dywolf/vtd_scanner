@@ -8,24 +8,19 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Set, List
 import requests
-
 from playwright.async_api import async_playwright
 
-# Config
-POLL_INTERVAL = 360  # seconds
+POLL_INTERVAL = 360
 SEARCH_FILE = "search.json"
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 LISTING_LIMIT_PER_NOTIFY = 10
 
-# Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("vtd_scanner")
 
-# State
 seen_per_search: Dict[str, Set[str]] = {}
 playwright_loop = None
-
 DISCORD_API_BASE = "https://discord.com/api/v10"
 
 def send_discord_message(channel_id: str, token: str, content: str, button_label: str, button_url: str):
@@ -43,8 +38,8 @@ def send_discord_message(channel_id: str, token: str, content: str, button_label
             logger.info(f"Notification envoyée pour {button_url}")
         else:
             logger.error(f"Erreur Discord {resp.status_code}: {resp.text}")
-    except Exception as e:
-        logger.exception(f"Exception en envoyant Discord: {e}")
+    except Exception:
+        logger.exception("Exception en envoyant Discord")
 
 def load_searches() -> List[str]:
     try:
@@ -56,17 +51,15 @@ def load_searches() -> List[str]:
             return data["searches"]
         logger.error("Format search.json non attendu (attendu list ou {\"searches\": [...]})")
         return []
-    except Exception as e:
-        logger.exception(f"Impossible de charger {SEARCH_FILE}: {e}")
+    except Exception:
+        logger.exception(f"Impossible de charger {SEARCH_FILE}")
         return []
 
 def extract_listing_id_from_href(href: str) -> str:
-    # Vinted item urls contain /item/<id>... we try to parse that pattern
     try:
         parts = href.split("/item/")
         if len(parts) >= 2:
             tail = parts[1]
-            # id may be followed by '-' or '/'
             id_part = tail.split("-")[0].split("/")[0]
             return id_part
     except Exception:
@@ -77,24 +70,18 @@ async def fetch_listings_with_playwright(url: str, browser) -> List[Dict]:
     page = await browser.new_page()
     try:
         await page.goto(url, wait_until="networkidle", timeout=30000)
-        # Allow any client-side rendering
-        # Query typical item anchors - adapt selectors if needed
-        # Vinted uses link selectors like 'a[href*="/item/"]'
         anchors = await page.query_selector_all('a[href*="/item/"]')
         results = []
         seen_hrefs = set()
         for a in anchors:
             href = await a.get_attribute("href")
-            if not href:
-                continue
-            if href in seen_hrefs:
+            if not href or href in seen_hrefs:
                 continue
             seen_hrefs.add(href)
             title = await a.get_attribute("title") or ""
             full_url = href if href.startswith("http") else ("https://www.vinted.fr" + href)
             item_id = extract_listing_id_from_href(full_url)
             results.append({"id": item_id, "url": full_url, "title": title})
-        # De-duplicate by id preserving order
         unique = []
         ids = set()
         for r in results:
@@ -102,8 +89,8 @@ async def fetch_listings_with_playwright(url: str, browser) -> List[Dict]:
                 ids.add(r["id"])
                 unique.append(r)
         return unique
-    except Exception as e:
-        logger.exception(f"Erreur Playwright fetching {url}: {e}")
+    except Exception:
+        logger.exception(f"Erreur Playwright fetching {url}")
         return []
     finally:
         try:
@@ -145,7 +132,6 @@ async def _worker_async(search_url: str, browser):
         await asyncio.sleep(POLL_INTERVAL)
 
 def start_worker_for_search(search_url: str):
-    # Schedule coroutine in the playwright loop
     async def schedule():
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
@@ -156,7 +142,6 @@ def start_worker_for_search(search_url: str):
                     await browser.close()
                 except Exception:
                     pass
-    # Run schedule in global loop
     asyncio.run_coroutine_threadsafe(schedule(), playwright_loop)
 
 def main():
@@ -168,19 +153,15 @@ def main():
         logger.error("Aucune recherche chargée dans search.json.")
         return
     logger.info(f"{len(searches)} recherches chargées.")
-    # Start Playwright event loop
     launch_playwright_loop()
-    # Start a worker (separate coroutine) for each search
     for s in searches:
         start_worker_for_search(s)
         time.sleep(0.5)
-    # Import keep_alive (it will start Flask server)
     try:
-        import keep_alive  # starts server on import
+        import keep_alive
         logger.info("keep_alive démarré.")
     except Exception:
         logger.exception("Erreur lors de l'import keep_alive.")
-    # Keep main thread alive
     try:
         while True:
             time.sleep(60)
