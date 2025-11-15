@@ -20,15 +20,27 @@ def fetch_ads_count(search):
         "per_page": 100,
     }
 
-    # Ajouter brand_ids[]
+    # brand_ids[]
     for bid in search.get("brand_ids", []):
         params.setdefault("brand_ids[]", []).append(bid)
 
-    r = requests.get(API_URL, params=params, timeout=10)
+    HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+        "Referer": "https://www.vinted.fr/",
+        "Origin": "https://www.vinted.fr",
+    }
+
+    r = requests.get(API_URL, params=params, headers=HEADERS, timeout=10)
     r.raise_for_status()
+
     data = r.json()
     return len(data.get("items", []))
-
 
 def run_worker():
     searches = load_searches()
@@ -65,4 +77,5 @@ if __name__ == "__main__":
 
     # Lance ton scanner Vinted
     run_worker()
+
 
